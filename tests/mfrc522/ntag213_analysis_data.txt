@@ -1,0 +1,102 @@
+Tag Type: 16
+Card detected 0X806E4A7A21BE04  uid=[0x04, 0xBE, 0x21, 0x7A, 0x4A, 0x6E, 0x80]
+00: [0x04, 0xBE, 0x21, 0x13, 0x7A, 0x4A, 0x6E, 0x80, 0xDE, 0x48, 0x00, 0x00, 0xE1, 0x11, 0x12, 0x00]    ..!.zJn..H......
+01: [0x01, 0x03, 0xA0, 0x0C, 0x34, 0x03, 0x0F, 0xD1, 0x01, 0x0B, 0x54, 0x02, 0x65, 0x6E, 0x7A, 0x65]    ....4.....T.enze
+02: [0x6D, 0x79, 0x62, 0x6C, 0x75, 0x65, 0xFE, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]    myblue..........
+03: [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]    ................
+
+Origin Hex byte: 
+04BE21137A4A6E80DE480000E11112000103A00C34030FD1010B5402656E7A656D79626C7565FE00000000000000000000000000000000000000000000000000
+
+
+NFC의 format 분석에 참고한 사이트
+* https://www.amebaiot.com.cn/en/nfc-intro/
+* https://developer.nordicsemi.com/nRF_Connect_SDK/doc/1.3.0/nrfxlib/nfc/doc/type_2_tag.html#static-lock-bytes
+
+NDEF의 format 분석에 참고한 사이트
+* https://sunflaur.tistory.com/301
+* https://smartits.tistory.com/206
+* https://velog.io/@hooray/NFC-NDEF-분석
+* https://github.com/rafaelurben/circuitpy-nfc/blob/main/documentation/NDEF.pdf
+
+
+분석
+-------------------
+04BE21137A4A6E80 (NFC serial number)
+DE480000E1111200 (여기는 까지는 static으로 NFC의 변경할 수 없는 고정 영역)
+	DE => checksum(?)
+	48 => NFC Lib version
+	0000 => Static Lock bytes
+
+	E1 => CC0, NFC magic number
+	11 => CC1, Document version number (v1.1 ?)
+	12 => CC2, Size of data area (144 bytes / 8 => 18)
+	00 => CC3, R/W access (read/write), 0F는 read only
+
+---------------------
+data 영역, 
+ - data는 TLV로 구성된다. 
+   - T: blocktype
+   - L: block length
+   - V: value (block length 만큼 존재)
+
+0103A00C34 030F (여기서부터는 데이터 영역)
+	01 =>(T) Lock Control TLV, Defines details of the lock bits
+	03 =>(L) block length (3 bytes)
+	A00034 =>(V) 
+
+	03 =>(T) NDEF Message TLV
+	0f =>(L) NDEF 길이 (15 bytes)
+
+<-- 여기부터 NDEF 영역 (V)
+D1010B5402656E7A656D79626C7565 (15 bytes)
+
+FE => NFC data의 끝임을 표시함.
+
+00000000000000000000000000000000000000000000000000
+
+0103A00C34030F D1010B5402656E7A656D79626C7565FE00000000000000000000000000000000000000000000000000
+
+-----------
+NDEF Message는 여러 Record 들의 목록으로 구성됨. 
+
+NDEF Message => Record1 + Record2 + Record3 ...
+
+Record => Header + Payload
+Header => Identifier + Length + Type
+Record => Identifier, Length, Type, Payload
+
+Record
+- header: 1byte
+- type length: 1byte
+- payload length: 1byte or 4byte
+- id length: 1byte
+- type: 'type length' bytes
+- id: 'id length' bytes
+- payload: 'payload length' bytes
+
+----------
+NDEF 분석
+
+D1 01 0B 5402656E 7A656D79626C7565 (zemyblue) FE
+
+D1 header(Identifier)
+	1101 0001
+	MB(1), ME(1), CF(0), SR(1), IL(0), TNF(001 - NFC Forum Type)
+		SR: Short Record, 1이면 payload 길이는 1byte, 0이면 4bytes
+		IL: ID Length, 레코드 ID가 존재하는 경우 이 비트가 1
+01 Type Length (1 byte)
+0B Payload length (11 byte)
+54 Type ('T' => Text)
+
+02656E 7A656D79626C7565 Payload
+	02 => 0000 0010
+		0 UTF8/UTF16, If 0 => UTF8
+		0 Revserved
+
+		000010 => Lang Code Length (2 byte)
+	656E (en) Language code
+
+	7A656D79626C7565 text (zemyblue)
+
+FE => NFT format에서 End File
